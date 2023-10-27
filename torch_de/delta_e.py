@@ -13,8 +13,8 @@ def _srgb2xyz(images: torch.Tensor, device = None) -> torch.Tensor:
           representations of the input images.
     """
     mask = (images > 0.04045).float()
-    images = 100 * (mask * (((images + 0.055) / 1.055) ** 2.4) +
-                    (1 - mask) * (images / 12.92))
+    images = 100 * (mask * (((images + 0.055) / 1.055) ** 2.4)
+                 + (1 - mask) * (images / 12.92))
 
     mat = torch.tensor([
         [0.4124, 0.2126, 0.0193],
@@ -37,12 +37,14 @@ def _xyz2lab(images: torch.Tensor, device = None) -> torch.Tensor:
         A torch tensor with the same shape as the input, containing CIE-Lab
           representation of the input images.
     """
-    ref_xyz = torch.tensor([95.047, 100.000, 108.883])
+
+    # TODO: Add configuration for setting reference.
+    ref_xyz = torch.tensor([95.047, 100.000, 108.883], device=device)
 
     images /= ref_xyz
     mask = (images > 0.008856).float()
-    images = ((mask) * (images ** (1. / 3.)) +
-                (1 - mask) * ((7.787 * images) + (16. / 116.)))
+    images = ((mask) * (images ** (1. / 3.))
+              + (1 - mask) * ((7.787 * images) + (16. / 116.)))
 
     mat = torch.tensor([
         [  0.,  500.,    0.],
@@ -124,6 +126,9 @@ def ciede2000_lab(image_1: torch.Tensor, image_2: torch.Tensor) -> torch.Tensor:
     """
     _image_sanity_check(image_1, image_2, channel_first=False)
 
+    # A small epsilon to avoid nan when backpropagating torch.sqrt().
+    EPSILON = 1e-14
+
     l1 = image_1[:, :, :, 0]
     a1 = image_1[:, :, :, 1]
     b1 = image_1[:, :, :, 2]
@@ -132,21 +137,21 @@ def ciede2000_lab(image_1: torch.Tensor, image_2: torch.Tensor) -> torch.Tensor:
     a2 = image_2[:, :, :, 1]
     b2 = image_2[:, :, :, 2]
 
-    k_l = 1
-    k_c = 1
-    k_h = 1
+    k_l = 1.
+    k_c = 1.
+    k_h = 1.
 
-    c1 = torch.sqrt(a1**2 + b1**2)
-    c2 = torch.sqrt(a2**2 + b2**2)
+    c1 = torch.sqrt(a1 ** 2. + b1 ** 2.)
+    c2 = torch.sqrt(a2 ** 2. + b2 ** 2.)
     c_bar = (c1 + c2) / 2.
 
-    c_bar_7 = c_bar**7
-    g = 0.5 * (1 - torch.sqrt(c_bar_7 / (c_bar_7 + 25**7)))
-    a1_prime = (1 + g) * a1
-    a2_prime = (1 + g) * a2
+    c_bar_7 = c_bar ** 7.
+    g = 0.5 * (1. - torch.sqrt(c_bar_7 / (c_bar_7 + 25. ** 7.) + EPSILON))
+    a1_prime = (1. + g) * a1
+    a2_prime = (1. + g) * a2
 
-    c1_prime = torch.sqrt(a1_prime**2 + b1**2)
-    c2_prime = torch.sqrt(a2_prime**2 + b2**2)
+    c1_prime = torch.sqrt(a1_prime ** 2. + b1 ** 2.)
+    c2_prime = torch.sqrt(a2_prime ** 2. + b2 ** 2.)
 
     h1_prime = _to_degree(torch.atan2(b1, a1_prime))
     h2_prime = _to_degree(torch.atan2(b2, a2_prime))
@@ -155,47 +160,49 @@ def ciede2000_lab(image_1: torch.Tensor, image_2: torch.Tensor) -> torch.Tensor:
     delta_c_prime = c2_prime - c1_prime
 
     delta_h_prime = h2_prime - h1_prime
-    mask1 = (delta_h_prime > 180).float()
-    mask2 = (delta_h_prime < -180).float()
+    mask1 = (delta_h_prime > 180.).float()
+    mask2 = (delta_h_prime < -180.).float()
 
-    delta_h_prime = ((1 - mask1 - mask2) * delta_h_prime
-                     + mask1 * (delta_h_prime - 360)
-                     + mask2 * (delta_h_prime + 360))
+    delta_h_prime = ((1. - mask1 - mask2) * delta_h_prime
+                     + mask1 * (delta_h_prime - 360.)
+                     + mask2 * (delta_h_prime + 360.))
 
-    delta_h_prime = (2 * torch.sqrt(c1_prime * c2_prime)
-                       * torch.sin(_to_radians(delta_h_prime / 2.)))
+    delta_h_prime = (2. * torch.sqrt(c1_prime * c2_prime)
+                        * torch.sin(_to_radians(delta_h_prime / 2.)))
 
     l_prime_bar = (l1 + l2) / 2.
     c_prime_bar = (c1_prime + c2_prime) / 2.
 
-    mask1 = (torch.abs(h1_prime - h2_prime) <= 180).float()
-    mask2 = (h1_prime + h2_prime < 360).float()
+    mask1 = (torch.abs(h1_prime - h2_prime) <= 180.).float()
+    mask2 = (h1_prime + h2_prime < 360.).float()
 
     h_prime_bar = (h1_prime + h2_prime) / 2.
     h_prime_bar = ((1 - mask1 - mask2) * (h_prime_bar - 180.)
                    + mask1 * h_prime_bar
                    + mask2 * (h_prime_bar + 180.))
 
-    t = (1 - 0.17 * torch.cos(_to_radians(h_prime_bar - 30))
-           + 0.24 * torch.cos(_to_radians(2 * h_prime_bar))
-           + 0.32 * torch.cos(_to_radians(3 * h_prime_bar + 6))
-           - 0.20 * torch.cos(_to_radians(4 * h_prime_bar - 63)))
+    t = (1. - 0.17 * torch.cos(_to_radians(h_prime_bar - 30.))
+            + 0.24 * torch.cos(_to_radians(2. * h_prime_bar))
+            + 0.32 * torch.cos(_to_radians(3. * h_prime_bar + 6.))
+            - 0.20 * torch.cos(_to_radians(4. * h_prime_bar - 63.)))
 
-    delta_theta = 30 * torch.exp(-((h_prime_bar - 275) / 25)**2)
+    delta_theta = 30. * torch.exp(-((h_prime_bar - 275.) / 25.) ** 2.)
 
-    c_prime_bar_7 = c_prime_bar**7
-    r_c = 2 * torch.sqrt(c_prime_bar_7 / (c_prime_bar_7 + 25**7))
-    s_l = 1 + ((0.015 * (l_prime_bar - 50)**2)
-              / torch.sqrt(20 + (l_prime_bar - 50)**2))
-    s_c = 1 + 0.045 * c_prime_bar
-    s_h = 1 + 0.015 * c_prime_bar * t
-    r_t = -torch.sin(2 * delta_theta) * r_c
+    c_prime_bar_7 = c_prime_bar ** 7.
+    r_c = 2. * torch.sqrt(
+                    c_prime_bar_7 / (c_prime_bar_7 + (25. ** 7.)) + EPSILON)
+    s_l = 1. + ((0.015 * (l_prime_bar - 50.) ** 2.)
+              / torch.sqrt(20 + (l_prime_bar - 50.) ** 2.))
+    s_c = 1. + 0.045 * c_prime_bar
+    s_h = 1. + 0.015 * c_prime_bar * t
+    r_t = -torch.sin(_to_radians(2. * delta_theta)) * r_c
 
     delta_e = torch.sqrt(
-        (delta_l_prime / (k_l * s_l)) ** 2
-      + (delta_c_prime / (k_c * s_c)) ** 2
-      + (delta_h_prime / (k_h * s_h)) ** 2
+        (delta_l_prime / (k_l * s_l)) ** 2.
+      + (delta_c_prime / (k_c * s_c)) ** 2.
+      + (delta_h_prime / (k_h * s_h)) ** 2.
       + r_t * (delta_c_prime / (k_c * s_c)) * (delta_h_prime / (k_h * s_h))
+      + EPSILON
     )
 
     return delta_e
