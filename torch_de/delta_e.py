@@ -20,7 +20,7 @@ def _srgb2xyz(images: torch.Tensor, device = None) -> torch.Tensor:
         [0.4124, 0.2126, 0.0193],
         [0.3576, 0.7152, 0.1192],
         [0.1805, 0.0722, 0.9505],
-    ], deivce=device)
+    ], device=device)
 
     images = torch.matmul(images, mat)
     return images
@@ -63,6 +63,25 @@ def _to_degree(x: torch.Tensor) -> torch.Tensor:
 def _to_radians(x: torch.Tensor) -> torch.Tensor:
     return x * torch.pi / 180.
 
+def _image_sanity_check(
+        image_1: torch.Tensor, image_2: torch.Tensor, channel_first: bool):
+    """ Sanity checks for input tensors.
+
+    Args:
+        image_1: Input images.
+        image_2: Input images.
+        channel_first: True if the tensor shapes should be NCHW, False if the
+          shapes should be NHWC.
+    """
+    if len(image_1.shape) != 4 or len(image_2.shape) != 4:
+        raise ValueError("Both inputs should be 4-dimension tensor.")
+
+    if image_1.shape != image_2.shape:
+        raise ValueError("Inputs' shape does not match.")
+
+    if image_1.shape[1 if channel_first else 3] != 3:
+        raise ValueError("Inputs should have exactly 3 channels")
+
 def ciede2000_rgb(
         image_1: torch.Tensor,
         image_2: torch.Tensor,
@@ -83,6 +102,8 @@ def ciede2000_rgb(
     Returns:
         Color difference between the two sets of images.
     """
+    _image_sanity_check(image_1, image_2, channel_first)
+
     if channel_first:
         image_1 = image_1.permute(0, 2, 3, 1)
         image_2 = image_2.permute(0, 2, 3, 1)
@@ -101,6 +122,8 @@ def ciede2000_lab(image_1: torch.Tensor, image_2: torch.Tensor) -> torch.Tensor:
     Returns:
         Color differences between the two sets of images.
     """
+    _image_sanity_check(image_1, image_2, channel_first=False)
+
     l1 = image_1[:, :, :, 0]
     a1 = image_1[:, :, :, 1]
     b1 = image_1[:, :, :, 2]
